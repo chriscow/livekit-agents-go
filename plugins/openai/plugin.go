@@ -1,6 +1,9 @@
 package openai
 
 import (
+	"fmt"
+	"log"
+
 	"livekit-agents-go/plugins"
 	"livekit-agents-go/services/llm"
 	"livekit-agents-go/services/stt"
@@ -23,34 +26,59 @@ func NewPlugin(apiKey string) *Plugin {
 
 // Register registers OpenAI services with the plugin registry
 func (p *Plugin) Register(registry *plugins.Registry) error {
+	if p.apiKey == "" {
+		return fmt.Errorf("OpenAI API key is required")
+	}
+
+	log.Printf("🔌 Registering OpenAI plugin services...")
+
 	// Register STT service (Whisper)
 	registry.RegisterSTT("whisper", func() stt.STT {
+		log.Printf("🎙️ Creating Whisper STT service")
 		return NewWhisperSTT(p.apiKey)
 	})
 
 	// Register TTS service
 	registry.RegisterTTS("openai-tts", func() tts.TTS {
+		log.Printf("🔊 Creating OpenAI TTS service")
 		return NewOpenAITTS(p.apiKey)
 	})
 
 	// Register LLM services
-	registry.RegisterLLM("gpt-4", func() llm.LLM {
-		return NewGPTLLM(p.apiKey, "gpt-4")
-	})
+	llmModels := map[string]string{
+		"gpt-4":         "gpt-4",
+		"gpt-4-turbo":   "gpt-4-turbo",
+		"gpt-4o":        "gpt-4o",
+		"gpt-4o-mini":   "gpt-4o-mini",
+		"gpt-3.5-turbo": "gpt-3.5-turbo",
+	}
 
-	registry.RegisterLLM("gpt-3.5-turbo", func() llm.LLM {
-		return NewGPTLLM(p.apiKey, "gpt-3.5-turbo")
-	})
+	for serviceName, modelName := range llmModels {
+		// Capture variables for closure
+		svcName := serviceName
+		mdlName := modelName
+		registry.RegisterLLM(svcName, func() llm.LLM {
+			log.Printf("🤖 Creating OpenAI LLM service: %s", svcName)
+			return NewGPTLLM(p.apiKey, mdlName)
+		})
+	}
 
-	registry.RegisterLLM("gpt-4-turbo", func() llm.LLM {
-		return NewGPTLLM(p.apiKey, "gpt-4-turbo")
-	})
-
+	log.Printf("✅ OpenAI plugin registered successfully (STT: 1, TTS: 1, LLM: %d)", len(llmModels))
 	return nil
 }
 
 // RegisterPlugin registers the OpenAI plugin with the global registry
 func RegisterPlugin(apiKey string) error {
+	if apiKey == "" {
+		return fmt.Errorf("OpenAI API key cannot be empty")
+	}
+	
+	log.Printf("🚀 Registering OpenAI plugin with API key: %s...", apiKey[:8]+"...")
 	plugin := NewPlugin(apiKey)
 	return plugins.RegisterPlugin(plugin)
+}
+
+// Register the delegate function for auto-discovery
+func init() {
+	plugins.RegisterPluginDelegate("openai", RegisterPlugin)
 }

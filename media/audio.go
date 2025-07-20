@@ -119,3 +119,75 @@ var (
 		Format:        AudioFormatPCM,
 	}
 )
+
+// ResampleAudioFrame resamples an audio frame to a target sample rate
+func ResampleAudioFrame(frame *AudioFrame, targetSampleRate int) (*AudioFrame, error) {
+	// If already at target sample rate, return a clone
+	if frame.Format.SampleRate == targetSampleRate {
+		return frame.Clone(), nil
+	}
+	
+	// Only support 16-bit PCM mono for now
+	if frame.Format.Format != AudioFormatPCM || frame.Format.BitsPerSample != 16 || frame.Format.Channels != 1 {
+		return nil, fmt.Errorf("resampling only supported for 16-bit PCM mono audio")
+	}
+	
+	// Calculate resampling ratio
+	ratio := float64(frame.Format.SampleRate) / float64(targetSampleRate)
+	inputSamples := len(frame.Data) / 2 // 16-bit = 2 bytes per sample
+	outputSamples := int(float64(inputSamples) / ratio)
+	
+	// Create output buffer
+	outputData := make([]byte, outputSamples*2) // 2 bytes per 16-bit sample
+	
+	// Perform simple linear interpolation resampling
+	for i := 0; i < outputSamples; i++ {
+		srcIndex := float64(i) * ratio
+		srcIndexInt := int(srcIndex)
+		
+		if srcIndexInt >= inputSamples-1 {
+			break
+		}
+		
+		// Read input samples as little-endian int16
+		sample1 := int16(frame.Data[srcIndexInt*2]) | (int16(frame.Data[srcIndexInt*2+1]) << 8)
+		
+		var sample2 int16
+		if srcIndexInt+1 < inputSamples {
+			sample2 = int16(frame.Data[(srcIndexInt+1)*2]) | (int16(frame.Data[(srcIndexInt+1)*2+1]) << 8)
+		} else {
+			sample2 = sample1 // Use last sample if at end
+		}
+		
+		// Linear interpolation
+		fraction := srcIndex - float64(srcIndexInt)
+		interpolated := float64(sample1)*(1-fraction) + float64(sample2)*fraction
+		outputSample := int16(interpolated)
+		
+		// Write output sample as little-endian int16
+		outputData[i*2] = byte(outputSample & 0xFF)
+		outputData[i*2+1] = byte((outputSample >> 8) & 0xFF)
+	}
+	
+	// Create output format
+	outputFormat := frame.Format
+	outputFormat.SampleRate = targetSampleRate
+	
+	// Create resampled frame
+	resampledFrame := &AudioFrame{
+		Data:      outputData,
+		Format:    outputFormat,
+		Timestamp: frame.Timestamp,
+		Duration:  calculateDuration(len(outputData), outputFormat),
+		Metadata:  make(map[string]interface{}),
+	}
+	
+	// Copy metadata
+	for k, v := range frame.Metadata {
+		resampledFrame.Metadata[k] = v
+	}
+	resampledFrame.Metadata["resampled"] = true
+	resampledFrame.Metadata["original_sample_rate"] = frame.Format.SampleRate
+	
+	return resampledFrame, nil
+}

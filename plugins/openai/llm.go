@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"log"
+	"time"
 
 	"livekit-agents-go/services/llm"
 
@@ -75,6 +77,9 @@ func (g *GPTLLM) Chat(ctx context.Context, messages []llm.Message, opts *llm.Cha
 		opts = llm.DefaultChatOptions()
 	}
 
+	log.Printf("🤖 Starting OpenAI chat completion with %d messages (model: %s)", len(messages), g.model)
+	start := time.Now()
+
 	// Convert messages to OpenAI format
 	openaiMessages := make([]openai.ChatCompletionMessage, len(messages))
 	for i, msg := range messages {
@@ -116,10 +121,12 @@ func (g *GPTLLM) Chat(ctx context.Context, messages []llm.Message, opts *llm.Cha
 
 	resp, err := g.client.CreateChatCompletion(ctx, req)
 	if err != nil {
+		log.Printf("❌ OpenAI chat completion failed: %v", err)
 		return nil, fmt.Errorf("chat completion request failed: %w", err)
 	}
 
 	if len(resp.Choices) == 0 {
+		log.Printf("❌ OpenAI returned no completion choices")
 		return nil, fmt.Errorf("no chat completion choices returned")
 	}
 
@@ -141,6 +148,10 @@ func (g *GPTLLM) Chat(ctx context.Context, messages []llm.Message, opts *llm.Cha
 		}
 	}
 
+	duration := time.Since(start)
+	log.Printf("✅ OpenAI chat completion successful: '%s' (tokens: %d, duration: %v)", 
+		choice.Message.Content, resp.Usage.TotalTokens, duration)
+
 	return &llm.ChatCompletion{
 		Message: llm.Message{
 			Role:      llm.MessageRole(choice.Message.Role),
@@ -154,8 +165,9 @@ func (g *GPTLLM) Chat(ctx context.Context, messages []llm.Message, opts *llm.Cha
 			TotalTokens:      resp.Usage.TotalTokens,
 		},
 		Metadata: map[string]interface{}{
-			"model": g.model,
-			"index": choice.Index,
+			"model":    g.model,
+			"index":    choice.Index,
+			"duration": duration,
 		},
 	}, nil
 }
@@ -165,6 +177,8 @@ func (g *GPTLLM) ChatStream(ctx context.Context, messages []llm.Message, opts *l
 	if opts == nil {
 		opts = llm.DefaultChatOptions()
 	}
+
+	log.Printf("🌊 Starting OpenAI streaming chat completion with %d messages (model: %s)", len(messages), g.model)
 
 	// Convert messages to OpenAI format
 	openaiMessages := make([]openai.ChatCompletionMessage, len(messages))
@@ -208,9 +222,11 @@ func (g *GPTLLM) ChatStream(ctx context.Context, messages []llm.Message, opts *l
 
 	stream, err := g.client.CreateChatCompletionStream(ctx, req)
 	if err != nil {
+		log.Printf("❌ OpenAI streaming chat completion failed: %v", err)
 		return nil, fmt.Errorf("chat completion stream request failed: %w", err)
 	}
 
+	log.Printf("✅ OpenAI streaming chat session created")
 	return &GPTChatStream{
 		stream: stream,
 		closed: false,

@@ -173,6 +173,14 @@ type WorkerOptions struct {
 	// Agent configuration
 	AgentName string
 	Metadata  map[string]string
+
+	// Connect mode specific fields
+	RoomName            string
+	ParticipantIdentity string
+
+	// Console mode settings (Python cli.py equivalent)
+	ConsoleMode bool   // Enable console mode with local audio I/O
+	Record      bool   // Whether to record the conversation in console mode
 }
 
 // JobScheduler manages job execution
@@ -343,6 +351,12 @@ func (w *Worker) Start(ctx context.Context) error {
 	w.mu.Unlock()
 
 	log.Printf("Starting worker with agent: %s", w.opts.AgentName)
+
+	// Check for console mode (Python console mode equivalent)
+	if w.opts.ConsoleMode {
+		log.Println("Console mode detected - setting up local audio I/O")
+		return w.startConsoleMode(ctx)
+	}
 
 	// Start job scheduler
 	if err := w.scheduler.Start(ctx); err != nil {
@@ -1147,7 +1161,7 @@ func (w *Worker) publishResponse(participantID, response string, usage llm.Usage
 			return
 		}
 
-		log.Printf("🎵 TTS synthesis successful: %d bytes of %s audio",
+		log.Printf("🎵 TTS synthesis successful: %d bytes of %v audio",
 			len(audioFrame.Data), audioFrame.Format.Format)
 		log.Printf("🎵 Audio frame details: %s", audioFrame.String())
 
@@ -1667,4 +1681,26 @@ func (w *Worker) convertSampleRate(pcmData []byte, fromRate, toRate, bitsPerSamp
 	}
 	
 	return result
+}
+
+// startConsoleMode implements Python-style console mode with mock room and local audio I/O
+func (w *Worker) startConsoleMode(ctx context.Context) error {
+	log.Printf("==================================================")
+	log.Printf("     LiveKit Agents - Console")
+	log.Printf("==================================================")
+	log.Printf("Press [Ctrl+B] to toggle between Text/Audio mode, [Q] to quit.")
+	log.Printf("")
+
+	// TODO: Implement ChatCLI for local audio I/O bypass
+	// For now, use the existing console agent as a bridge
+	log.Printf("Console mode setup:")
+	log.Printf("  Mock room: %s", w.opts.RoomName)
+	log.Printf("  Fake URL: %s", w.opts.LiveKitURL)
+	log.Printf("  Record: %v", w.opts.Record)
+
+	// Create console agent as a temporary bridge until we implement ChatCLI
+	consoleAgent := NewConsoleAgent(w.opts)
+	
+	// Start the console agent which handles local audio I/O
+	return consoleAgent.Start(ctx)
 }

@@ -2,6 +2,7 @@ package agents
 
 import (
 	"context"
+	"log"
 	"time"
 
 	lksdk "github.com/livekit/server-sdk-go/v2"
@@ -65,6 +66,24 @@ func NewJobContext(ctx context.Context) *JobContext {
 			Status:    JobStatusPending,
 		},
 	}
+}
+
+// Connect connects to the RTC room (matching Python ctx.connect())
+func (jc *JobContext) Connect() error {
+	// For now, this creates a mock room connection to match Python behavior
+	// In a real implementation, this would connect to the actual LiveKit room
+	// using credentials from the worker context
+	
+	// Create a mock room for minimal worker demonstration
+	// TODO: Replace with actual LiveKit SDK connection
+	if jc.Room == nil {
+		// For minimal worker, we just need to demonstrate connection
+		// The room would be set by the worker framework in production
+		log.Printf("Mock connection established (room would be connected here)")
+		// jc.Room = mockRoom // Would be set in real implementation
+	}
+	
+	return nil
 }
 
 // ConnectToRoom connects to a LiveKit room with proper job context

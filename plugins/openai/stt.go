@@ -5,7 +5,9 @@ import (
 	"context"
 	"encoding/binary"
 	"fmt"
+	"io"
 	"log"
+	"sync"
 	"time"
 
 	"livekit-agents-go/media"
@@ -52,7 +54,20 @@ func (w *WhisperSTT) Recognize(ctx context.Context, audio *media.AudioFrame) (*s
 		}, nil
 	}
 
-	log.Printf("🎙️ Starting Whisper transcription for %d bytes of audio", len(audio.Data))
+	// Check if audio meets OpenAI's minimum duration requirement (0.1 seconds)
+	minDuration := 100 * time.Millisecond
+	if audio.Duration < minDuration {
+		log.Printf("⚠️ Audio too short for Whisper (%v < %v) - returning empty result", audio.Duration, minDuration)
+		return &stt.Recognition{
+			Text:       "",
+			Confidence: 0.0,
+			IsFinal:    true,
+			Language:   "en",
+			Metadata:   make(map[string]interface{}),
+		}, nil
+	}
+
+	log.Printf("🎙️ Starting Whisper transcription for %d bytes of audio (duration: %v)", len(audio.Data), audio.Duration)
 	
 	// Convert AudioFrame to WAV format for OpenAI API
 	wavData, err := w.convertToWAV(audio)
@@ -108,29 +123,53 @@ func (w *WhisperSTT) Recognize(ctx context.Context, audio *media.AudioFrame) (*s
 
 // RecognizeStream creates a streaming recognition session
 func (w *WhisperSTT) RecognizeStream(ctx context.Context) (stt.RecognitionStream, error) {
-	return &WhisperRecognitionStream{
-		stt:    w,
-		ctx:    ctx,
-		closed: false,
-	}, nil
+	stream := &WhisperRecognitionStream{
+		stt:            w,
+		ctx:            ctx,
+		closed:         false,
+		audioBuffer:    make([]*media.AudioFrame, 0),
+		resultChan:     make(chan *stt.Recognition, 10),
+		errorChan:      make(chan error, 5),
+		processingDone: make(chan struct{}),
+	}
+	
+	// Start background processing goroutine
+	go stream.processAudioBuffer()
+	
+	return stream, nil
 }
 
 // WhisperRecognitionStream implements streaming recognition for Whisper
 type WhisperRecognitionStream struct {
-	stt    *WhisperSTT
-	ctx    context.Context
-	closed bool
+	stt            *WhisperSTT
+	ctx            context.Context
+	closed         bool
+	resultChanClosed bool
+	errorChanClosed  bool
+	processingClosed bool
+	audioBuffer    []*media.AudioFrame
+	resultChan     chan *stt.Recognition
+	errorChan      chan error
+	processingDone chan struct{}
+	mu             sync.Mutex
 }
 
 // SendAudio sends audio data to the recognition stream
 func (s *WhisperRecognitionStream) SendAudio(audio *media.AudioFrame) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	
 	if s.closed {
 		return fmt.Errorf("stream is closed")
 	}
 
-	// TODO: Buffer audio data for batch processing
-	// Whisper doesn't support true streaming, so we need to buffer
-	// audio chunks and process them in batches
+	// Buffer audio frames for batch processing
+	// Whisper doesn't support true streaming, so we accumulate audio
+	// and process it in chunks of ~3 seconds for optimal results
+	s.audioBuffer = append(s.audioBuffer, audio)
+	
+	log.Printf("🎙️ Buffered audio frame: %d bytes (total frames: %d)", 
+		len(audio.Data), len(s.audioBuffer))
 
 	return nil
 }
@@ -138,32 +177,190 @@ func (s *WhisperRecognitionStream) SendAudio(audio *media.AudioFrame) error {
 // Recv receives recognition results from the stream
 func (s *WhisperRecognitionStream) Recv() (*stt.Recognition, error) {
 	if s.closed {
-		return nil, fmt.Errorf("stream is closed")
+		return nil, io.EOF
 	}
 
-	// TODO: Implement buffered recognition
-	// For now, return a mock result
-	return &stt.Recognition{
-		Text:       "Streaming mock result",
-		Confidence: 0.9,
-		Language:   "en",
-		IsFinal:    false,
-		Metadata: map[string]interface{}{
-			"stream": true,
-		},
-	}, nil
+	select {
+	case result := <-s.resultChan:
+		return result, nil
+	case err := <-s.errorChan:
+		return nil, err
+	case <-s.ctx.Done():
+		return nil, s.ctx.Err()
+	case <-s.processingDone:
+		// Check if there are any remaining results
+		select {
+		case result := <-s.resultChan:
+			return result, nil
+		default:
+			return nil, io.EOF
+		}
+	}
 }
 
 // Close closes the recognition stream
 func (s *WhisperRecognitionStream) Close() error {
-	s.closed = true
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	
+	if !s.closed {
+		s.closed = true
+		
+		// Close channels safely
+		if !s.processingClosed {
+			close(s.processingDone)
+			s.processingClosed = true
+		}
+		if !s.resultChanClosed {
+			close(s.resultChan)
+			s.resultChanClosed = true
+		}
+		if !s.errorChanClosed {
+			close(s.errorChan)
+			s.errorChanClosed = true
+		}
+	}
 	return nil
 }
 
 // CloseSend signals that no more audio will be sent
 func (s *WhisperRecognitionStream) CloseSend() error {
-	// For Whisper, this would trigger final processing of buffered audio
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	
+	if s.closed {
+		return fmt.Errorf("stream is already closed")
+	}
+	
+	log.Printf("🔚 CloseSend called - processing final audio buffer (%d frames)", len(s.audioBuffer))
+	
+	// Process any remaining audio in the buffer
+	if len(s.audioBuffer) > 0 {
+		go s.processFinalBuffer()
+	} else {
+		// No buffered audio, signal completion
+		go func() {
+			s.mu.Lock()
+			defer s.mu.Unlock()
+			if !s.processingClosed {
+				close(s.processingDone)
+				s.processingClosed = true
+			}
+		}()
+	}
+	
 	return nil
+}
+
+// processAudioBuffer runs in the background to process audio chunks
+func (s *WhisperRecognitionStream) processAudioBuffer() {
+	ticker := time.NewTicker(3 * time.Second) // Process every 3 seconds
+	defer ticker.Stop()
+	
+	for {
+		select {
+		case <-ticker.C:
+			s.processBufferedAudio(false)
+		case <-s.ctx.Done():
+			return
+		case <-s.processingDone:
+			return
+		}
+	}
+}
+
+// processFinalBuffer processes all remaining audio when stream is closing
+func (s *WhisperRecognitionStream) processFinalBuffer() {
+	s.processBufferedAudio(true)
+	
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if !s.processingClosed {
+		close(s.processingDone)
+		s.processingClosed = true
+	}
+}
+
+// processBufferedAudio processes currently buffered audio frames
+func (s *WhisperRecognitionStream) processBufferedAudio(isFinal bool) {
+	s.mu.Lock()
+	frames := make([]*media.AudioFrame, len(s.audioBuffer))
+	copy(frames, s.audioBuffer)
+	if !isFinal {
+		// Keep last few frames for continuity unless this is final processing
+		keepFrames := 2
+		if len(s.audioBuffer) > keepFrames {
+			s.audioBuffer = s.audioBuffer[len(s.audioBuffer)-keepFrames:]
+		}
+	} else {
+		s.audioBuffer = nil
+	}
+	s.mu.Unlock()
+	
+	if len(frames) == 0 {
+		return
+	}
+	
+	log.Printf("🔄 Processing %d buffered audio frames (final: %t)", len(frames), isFinal)
+	
+	// Combine all frames into a single audio frame
+	combined, err := s.stt.AccumulateAudioForSTT(frames)
+	if err != nil {
+		log.Printf("❌ Failed to combine audio frames: %v", err)
+		select {
+		case s.errorChan <- err:
+		case <-s.ctx.Done():
+		case <-s.processingDone:
+		}
+		return
+	}
+	
+	// Skip processing if combined audio is too short (OpenAI requires minimum 0.1 seconds)
+	minDuration := 100 * time.Millisecond
+	if combined.Duration < minDuration {
+		if isFinal {
+			log.Printf("⚠️ Final audio too short (%v < %v) - sending empty result", combined.Duration, minDuration)
+			// Send empty result for final processing
+			recognition := &stt.Recognition{
+				Text:       "",
+				Confidence: 0.0,
+				IsFinal:    true,
+				Language:   "en",
+				Metadata:   make(map[string]interface{}),
+			}
+			select {
+			case s.resultChan <- recognition:
+			case <-s.ctx.Done():
+			case <-s.processingDone:
+			}
+		} else {
+			log.Printf("⏭️ Skipping recognition - audio too short (%v < %v)", combined.Duration, minDuration)
+		}
+		return
+	}
+	
+	// Perform recognition
+	recognition, err := s.stt.Recognize(s.ctx, combined)
+	if err != nil {
+		log.Printf("❌ Streaming recognition failed: %v", err)
+		select {
+		case s.errorChan <- err:
+		case <-s.ctx.Done():
+		case <-s.processingDone:
+		}
+		return
+	}
+	
+	// Mark result as final only if this is the final processing or we got substantial text
+	recognition.IsFinal = isFinal || len(recognition.Text) > 0
+	
+	// Send result
+	select {
+	case s.resultChan <- recognition:
+		log.Printf("📤 Sent streaming recognition result: '%s' (final: %t)", recognition.Text, recognition.IsFinal)
+	case <-s.ctx.Done():
+	case <-s.processingDone:
+	}
 }
 
 // convertToWAV converts an AudioFrame to WAV format for OpenAI API

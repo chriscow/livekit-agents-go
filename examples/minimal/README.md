@@ -1,15 +1,16 @@
-# Minimal LiveKit Agent
+# Minimal Example
 
-A fully functional AI greeting agent that demonstrates LiveKit agent capabilities with OpenAI integration and real-time communication.
+The simplest possible LiveKit agent demonstrating basic **plugin integration** and **LiveKit room connectivity**. This example provides a foundation for understanding the core agent framework without the complexity of full voice processing pipelines.
 
-## Features
+## What This Example Demonstrates
 
-- ✅ **LiveKit Room Connection**: Connects to LiveKit rooms and handles participant events
-- ✅ **OpenAI Integration**: Generates AI responses using OpenAI's chat completion API
-- ✅ **Real-time Messaging**: Publishes messages to room participants via data channel
-- ✅ **Event Handling**: Responds to participant join/leave events
-- ✅ **Audio/Video Support**: Handles media track subscriptions
-- ✅ **Web Client**: Includes browser test client for easy testing
+- **Basic Agent Structure**: Minimal implementation of the Agent interface
+- **LiveKit Integration**: Real room connection and event handling
+- **Plugin System**: Automatic OpenAI service integration with API key detection
+- **Token Generation**: JWT token creation for LiveKit authentication
+- **Room Events**: Participant join/leave handling
+- **Data Publishing**: Sending messages to LiveKit rooms
+- **Smart Service Selection**: Uses real AI services when available, mocks when not
 
 ## Quick Setup
 
@@ -108,11 +109,80 @@ Visit: https://example.livekit.io
 
 ## How It Works
 
-1. **Agent Startup**: The agent connects to LiveKit and waits for room assignments
-2. **Participant Detection**: When a participant joins a room, the agent detects the event
-3. **AI Response**: The agent uses OpenAI to generate a personalized greeting
-4. **Message Publishing**: The greeting is published to the room via LiveKit's data channel
-5. **Real-time Delivery**: All participants in the room receive the message instantly
+### Agent Functionality
+The minimal agent implements a simple **greeting system**:
+
+1. **Room Connection**: Connects to LiveKit room on startup
+2. **Participant Detection**: Listens for participants joining/leaving
+3. **LLM Integration**: Uses OpenAI GPT to generate personalized greetings
+4. **Data Publishing**: Sends greetings as data messages to the room
+
+### Plugin System Integration
+- **Auto-Discovery**: Automatically detects OpenAI API key and registers plugin
+- **Graceful Fallback**: Works with or without API keys (uses mocks when unavailable)
+- **Smart Services**: Uses `plugins.CreateSmartServices()` for automatic service selection
+
+## Expected Output
+
+### With OpenAI API Key (Production Mode)
+```
+🎉 ENTRYPOINT CALLED! JobContext received
+Starting greeting agent in room: test-room
+
+🔍 Auto-discovering plugins based on environment variables...
+🔑 Found OpenAI API key, registering OpenAI plugin
+✅ OpenAI plugin registered successfully (STT: 1, TTS: 1, LLM: 5)
+
+Testing OpenAI LLM service...
+OpenAI LLM service created: gpt v1.0.0
+🤖 LLM generated greeting: Hello and welcome to our LiveKit room! I'm here to assist you.
+📊 Token usage: 15 prompt + 12 completion = 27 total
+📡 Published greeting to room: Hello and welcome to our LiveKit room! I'm here to assist you.
+```
+
+### Without OpenAI API Key (Development Mode)
+```
+🔍 Auto-discovering plugins based on environment variables...
+🎭 Mock plugin registered as fallback
+✅ Auto-discovery complete: 1 plugins registered
+
+No OpenAI API key provided, skipping LLM test
+```
+
+### Room Connection Success
+```
+Greeting agent started
+Event: Participant joined
+Event: Data received - [greeting message]
+```
+
+## What Success Looks Like
+
+✅ **Minimal Agent Success**:
+- Agent starts without errors
+- Plugin system initializes and detects available services
+- Room connection established (if LiveKit server available)
+- Event handlers respond to room events
+- LLM integration works when API key present
+- Clean shutdown on termination
+
+✅ **With LiveKit Server**:
+- "ENTRYPOINT CALLED!" message appears
+- Room name logged successfully
+- Participant events detected
+- Data publishing works
+
+✅ **With OpenAI Integration**:
+- Auto-discovery detects OpenAI plugin
+- LLM service creation succeeds
+- Greeting generation completes
+- Token usage statistics displayed
+- Published greeting message logged
+
+❌ **Common Issues**:
+- Missing LiveKit credentials → Connection failures (expected without server)
+- Invalid API keys → Authentication errors  
+- Network issues → Timeout errors
 
 ## Code Structure
 

@@ -5,14 +5,19 @@ go 1.24.2
 toolchain go1.24.4
 
 require (
+	github.com/chriscow/minds v0.0.0-00010101000000-000000000000
 	github.com/fsnotify/fsnotify v1.9.0
+	github.com/gordonklaus/portaudio v0.0.0-20250206071425-98a94950218b
+	github.com/gorilla/websocket v1.5.3
 	github.com/hraban/opus v0.0.0-20230925203106-0188a62cb302
+	github.com/joho/godotenv v1.5.1
 	github.com/livekit/protocol v1.39.0
 	github.com/livekit/server-sdk-go/v2 v2.9.1
 	github.com/pion/rtp v1.8.19
 	github.com/pion/webrtc/v4 v4.1.1
 	github.com/sashabaranov/go-openai v1.20.4
 	github.com/spf13/cobra v1.8.0
+	github.com/yalue/onnxruntime_go v1.21.0
 )
 
 require (
@@ -21,7 +26,6 @@ require (
 	buf.build/go/protoyaml v0.6.0 // indirect
 	cel.dev/expr v0.24.0 // indirect
 	github.com/antlr4-go/antlr/v4 v4.13.1 // indirect
-	github.com/at-wat/ebml-go v0.17.1 // indirect
 	github.com/benbjohnson/clock v1.3.5 // indirect
 	github.com/bep/debounce v1.2.1 // indirect
 	github.com/cespare/xxhash/v2 v2.3.0 // indirect
@@ -34,14 +38,12 @@ require (
 	github.com/go-logr/stdr v1.2.2 // indirect
 	github.com/google/cel-go v0.25.0 // indirect
 	github.com/google/uuid v1.6.0 // indirect
-	github.com/gorilla/websocket v1.5.3 // indirect
 	github.com/inconshreveable/mousetrap v1.1.0 // indirect
 	github.com/jxskiss/base62 v1.1.0 // indirect
 	github.com/klauspost/compress v1.18.0 // indirect
 	github.com/klauspost/cpuid/v2 v2.2.10 // indirect
 	github.com/lithammer/shortuuid/v4 v4.2.0 // indirect
 	github.com/livekit/mageutil v0.0.0-20250511045019-0f1ff63f7731 // indirect
-	github.com/livekit/media-sdk v0.0.0-20250518151703-b07af88637c5 // indirect
 	github.com/livekit/mediatransportutil v0.0.0-20250519131108-fb90f5acfded // indirect
 	github.com/livekit/psrpc v0.6.1-0.20250511053145-465289d72c3c // indirect
 	github.com/magefile/mage v1.15.0 // indirect
@@ -83,6 +85,8 @@ require (
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20250512202823-5a2f75b736a9 // indirect
 	google.golang.org/grpc v1.72.1 // indirect
 	google.golang.org/protobuf v1.36.6 // indirect
-	gopkg.in/hraban/opus.v2 v2.0.0-20230925203106-0188a62cb302 // indirect
+	gopkg.in/yaml.v2 v2.4.0 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 )
+
+replace github.com/chriscow/minds => ./.local/minds

@@ -3,6 +3,7 @@ package llm
 import (
 	"context"
 	"io"
+	"time"
 )
 
 // LLM defines the Large Language Model service interface
@@ -272,5 +273,108 @@ func DefaultChatOptions() *ChatOptions {
 		Temperature: 0.7,
 		TopP:        1.0,
 		Metadata:    make(map[string]interface{}),
+	}
+}
+
+// ChatContext represents the conversation context (Python framework equivalent)
+type ChatContext struct {
+	Messages    []ChatMessage          `json:"messages"`
+	SystemPrompt string                `json:"system_prompt,omitempty"`
+	Tools       []Tool                 `json:"tools,omitempty"`
+	Metadata    map[string]interface{} `json:"metadata,omitempty"`
+}
+
+// ChatMessage represents a message in the chat context (Python framework equivalent)
+type ChatMessage struct {
+	Role      MessageRole `json:"role"`
+	Content   string      `json:"content"`
+	Name      string      `json:"name,omitempty"`
+	ToolCalls []ToolCall  `json:"tool_calls,omitempty"`
+	ToolCallID string     `json:"tool_call_id,omitempty"`
+	Timestamp int64       `json:"timestamp,omitempty"`
+}
+
+// NewChatContext creates a new chat context
+func NewChatContext() *ChatContext {
+	return &ChatContext{
+		Messages: make([]ChatMessage, 0),
+		Metadata: make(map[string]interface{}),
+	}
+}
+
+// NewChatContextWithSystem creates a chat context with system prompt
+func NewChatContextWithSystem(systemPrompt string) *ChatContext {
+	ctx := NewChatContext()
+	ctx.SystemPrompt = systemPrompt
+	if systemPrompt != "" {
+		ctx.Messages = append(ctx.Messages, ChatMessage{
+			Role:    RoleSystem,
+			Content: systemPrompt,
+		})
+	}
+	return ctx
+}
+
+// AddMessage adds a message to the chat context
+func (c *ChatContext) AddMessage(role MessageRole, content string) {
+	c.Messages = append(c.Messages, ChatMessage{
+		Role:      role,
+		Content:   content,
+		Timestamp: time.Now().Unix(),
+	})
+}
+
+// AddUserMessage adds a user message to the chat context
+func (c *ChatContext) AddUserMessage(content string) {
+	c.AddMessage(RoleUser, content)
+}
+
+// AddAssistantMessage adds an assistant message to the chat context
+func (c *ChatContext) AddAssistantMessage(content string) {
+	c.AddMessage(RoleAssistant, content)
+}
+
+// AddToolCallMessage adds a message with tool calls to the chat context
+func (c *ChatContext) AddToolCallMessage(toolCalls []ToolCall) {
+	c.Messages = append(c.Messages, ChatMessage{
+		Role:      RoleAssistant,
+		Content:   "",
+		ToolCalls: toolCalls,
+		Timestamp: time.Now().Unix(),
+	})
+}
+
+// AddToolResultMessage adds a tool result message to the chat context
+func (c *ChatContext) AddToolResultMessage(content, toolCallID, toolName string) {
+	c.Messages = append(c.Messages, ChatMessage{
+		Role:       RoleFunction,
+		Content:    content,
+		Name:       toolName,        // OpenAI requires 'name' field for function messages
+		ToolCallID: toolCallID,
+		Timestamp:  time.Now().Unix(),
+	})
+}
+
+// GetMessages returns messages in the format expected by LLM services
+func (c *ChatContext) GetMessages() []Message {
+	messages := make([]Message, len(c.Messages))
+	for i, msg := range c.Messages {
+		messages[i] = Message{
+			Role:       msg.Role,
+			Content:    msg.Content,
+			Name:       msg.Name,
+			ToolCalls:  msg.ToolCalls,
+			ToolCallID: msg.ToolCallID,
+		}
+	}
+	return messages
+}
+
+// Clear clears all messages except system prompt
+func (c *ChatContext) Clear() {
+	systemPrompt := c.SystemPrompt
+	c.Messages = make([]ChatMessage, 0)
+	if systemPrompt != "" {
+		c.AddMessage(RoleSystem, systemPrompt)
 	}
 }
