@@ -1,10 +1,10 @@
 **/.DS_Store
 **/*.env
-.claude/
-
-livekit-agents-py
-livekit-agents-js
-livekit-python-sdks
-livekit-server-sdk-go
+**/.local
+**/.claude
+**/.venv
 
 **/debug-audio/*.wav
+
+
+CLAUDE.md
