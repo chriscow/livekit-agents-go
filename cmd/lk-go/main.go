@@ -2,16 +2,22 @@ package main
 
 import (
 	"context"
+	"expvar"
 	"fmt"
 	"log/slog"
+	"net/http"
 	"os"
 	"os/signal"
 	"syscall"
 	"time"
 
 	"github.com/chriscow/livekit-agents-go/internal/worker"
+	"github.com/chriscow/livekit-agents-go/pkg/agent"
+	"github.com/chriscow/livekit-agents-go/pkg/ai/llm/fake"
 	"github.com/chriscow/livekit-agents-go/pkg/ai/stt"
-	"github.com/chriscow/livekit-agents-go/pkg/ai/stt/fake"
+	sttfake "github.com/chriscow/livekit-agents-go/pkg/ai/stt/fake"
+	ttsfake "github.com/chriscow/livekit-agents-go/pkg/ai/tts/fake"
+	vadfake "github.com/chriscow/livekit-agents-go/pkg/ai/vad/fake"
 	"github.com/chriscow/livekit-agents-go/pkg/audio/wav"
 	"github.com/chriscow/livekit-agents-go/pkg/job"
 	"github.com/chriscow/livekit-agents-go/pkg/rtc"
@@ -109,6 +115,47 @@ var jobCmd = &cobra.Command{
 var sttCmd = &cobra.Command{
 	Use:   "stt",
 	Short: "Speech-to-text commands",
+}
+
+var agentCmd = &cobra.Command{
+	Use:   "agent",
+	Short: "Voice agent commands",
+}
+
+var agentDemoCmd = &cobra.Command{
+	Use:   "demo",
+	Short: "Minimal example agent (echo bot)",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		url, _ := cmd.Flags().GetString("url")
+		token, _ := cmd.Flags().GetString("token")
+		roomName, _ := cmd.Flags().GetString("room")
+		metrics, _ := cmd.Flags().GetBool("metrics")
+		bgFile, _ := cmd.Flags().GetString("bg-file")
+		bgVolume, _ := cmd.Flags().GetFloat32("bg-volume")
+
+		logger := setupLogger()
+		logger.Info("Starting agent demo",
+			slog.String("service", "lk-go"),
+			slog.String("room", roomName),
+			slog.String("url", url),
+			slog.Bool("metrics", metrics))
+
+		if url == "" {
+			return fmt.Errorf("--url is required")
+		}
+		if token == "" {
+			return fmt.Errorf("--token is required")
+		}
+		if roomName == "" {
+			return fmt.Errorf("--room is required")
+		}
+
+		// Create context that cancels on interrupt
+		ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+		defer cancel()
+
+		return runAgentDemo(ctx, url, token, roomName, metrics, bgFile, bgVolume, logger)
+	},
 }
 
 var sttEchoCmd = &cobra.Command{
@@ -313,7 +360,7 @@ func runSTTEcho(filePath, provider string, logger *slog.Logger) error {
 	}
 
 	// Create fake STT provider
-	sttProvider := fake.NewFakeSTT("Hello, this is a test transcript from the fake STT provider.")
+	sttProvider := sttfake.NewFakeSTT("Hello, this is a test transcript from the fake STT provider.")
 
 	// Create context for the operation
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
@@ -420,6 +467,193 @@ func runSTTEchoWithFakeFrames(stream stt.STTStream, logger *slog.Logger) error {
 	return nil
 }
 
+func runAgentDemo(ctx context.Context, url, token, roomName string, metrics bool, bgFile string, bgVolume float32, logger *slog.Logger) error {
+	// Start metrics server if requested
+	if metrics {
+		go func() {
+			logger.Info("Starting metrics server on :8080")
+			mux := http.NewServeMux()
+			mux.Handle("/metrics", expvar.Handler())
+			if err := http.ListenAndServe(":8080", mux); err != nil {
+				logger.Error("Metrics server failed", slog.String("error", err.Error()))
+			}
+		}()
+	}
+
+	// Create job configuration
+	jobConfig := job.Config{
+		RoomName: roomName,
+		Timeout:  30 * time.Minute,
+	}
+
+	// Create the job
+	jobInstance, err := job.New(ctx, jobConfig)
+	if err != nil {
+		return fmt.Errorf("failed to create job: %w", err)
+	}
+
+	logger.Info("Job created for agent demo",
+		slog.String("job_id", jobInstance.ID),
+		slog.String("room_name", jobInstance.RoomName))
+
+	// Set up channels for audio communication
+	micIn := make(chan rtc.AudioFrame, 100)
+	ttsOut := make(chan rtc.AudioFrame, 100)
+
+	// Create fake AI providers for demo
+	sttProvider := sttfake.NewFakeSTT("User said: Hello, how are you doing today?")
+	ttsProvider := ttsfake.NewFakeTTS()
+	llmProvider := fake.NewFakeLLM(
+		"You said: Hello, how are you doing today?",
+		"I'm doing well, thank you for asking!",
+		"That's interesting, tell me more.",
+		"I understand what you're saying.",
+	)
+	vadProvider := vadfake.NewFakeVAD(0.3)
+
+	// Set up background audio if requested
+	var backgroundAudio *agent.BackgroundAudio
+	if bgFile != "" {
+		ba, err := agent.NewBackgroundAudio(agent.BackgroundAudioConfig{
+			AudioFile: bgFile,
+			Volume:    bgVolume,
+			Enabled:   true,
+		})
+		if err != nil {
+			logger.Warn("Failed to load background audio", slog.String("error", err.Error()))
+		} else {
+			backgroundAudio = ba
+			logger.Info("Background audio loaded", slog.String("file", bgFile), slog.Float64("volume", float64(bgVolume)))
+		}
+	}
+
+	// Create agent configuration
+	agentConfig := agent.Config{
+		STT:             sttProvider,
+		TTS:             ttsProvider,
+		LLM:             llmProvider,
+		VAD:             vadProvider,
+		MicIn:           micIn,
+		TTSOut:          ttsOut,
+		BackgroundAudio: backgroundAudio,
+	}
+
+	// Create the agent
+	voiceAgent, err := agent.New(agentConfig)
+	if err != nil {
+		return fmt.Errorf("failed to create agent: %w", err)
+	}
+	defer voiceAgent.Close()
+
+	logger.Info("Voice agent created successfully")
+
+	// Start background processes to simulate audio I/O
+	go simulateMicrophoneInput(ctx, micIn, logger)
+	go simulateSpeakerOutput(ctx, ttsOut, logger)
+
+	// Start the agent
+	logger.Info("Starting voice agent...")
+	agentCtx, agentCancel := context.WithCancel(ctx)
+	defer agentCancel()
+
+	agentDone := make(chan error, 1)
+	go func() {
+		agentDone <- voiceAgent.Start(agentCtx, jobInstance)
+	}()
+
+	// Wait for completion or interruption
+	select {
+	case err := <-agentDone:
+		if err != nil {
+			logger.Error("Agent failed", slog.String("error", err.Error()))
+			return err
+		}
+		logger.Info("Agent completed successfully")
+	case <-ctx.Done():
+		logger.Info("Agent demo cancelled by user")
+		agentCancel()
+		// Wait a bit for graceful shutdown
+		select {
+		case <-agentDone:
+		case <-time.After(5 * time.Second):
+			logger.Warn("Agent shutdown timeout")
+		}
+	}
+
+	return nil
+}
+
+func simulateMicrophoneInput(ctx context.Context, micIn chan<- rtc.AudioFrame, logger *slog.Logger) {
+	defer close(micIn)
+
+	ticker := time.NewTicker(10 * time.Millisecond) // 10ms frames
+	defer ticker.Stop()
+
+	frameCount := 0
+	speechStart := 50  // Start speech after 500ms
+	speechEnd := 200   // End speech after 2s
+
+	for {
+		select {
+		case <-ctx.Done():
+			logger.Debug("Microphone simulation stopped")
+			return
+		case <-ticker.C:
+			frame := rtc.AudioFrame{
+				Data:              make([]byte, 960), // 48kHz * 10ms * 1ch * 2bytes = 960
+				SampleRate:        48000,
+				SamplesPerChannel: 480,
+				NumChannels:       1,
+				Timestamp:         time.Duration(frameCount) * 10 * time.Millisecond,
+			}
+
+			// Simulate speech by filling with non-zero data during speech period
+			if frameCount >= speechStart && frameCount <= speechEnd {
+				for i := range frame.Data {
+					frame.Data[i] = byte((frameCount + i) % 256)
+				}
+			}
+
+			select {
+			case micIn <- frame:
+			case <-ctx.Done():
+				return
+			}
+
+			frameCount++
+
+			// Stop after 5 seconds for demo
+			if frameCount > 500 {
+				logger.Info("Microphone simulation completed")
+				return
+			}
+		}
+	}
+}
+
+func simulateSpeakerOutput(ctx context.Context, ttsOut <-chan rtc.AudioFrame, logger *slog.Logger) {
+	frameCount := 0
+	for {
+		select {
+		case <-ctx.Done():
+			logger.Debug("Speaker simulation stopped")
+			return
+		case frame, ok := <-ttsOut:
+			if !ok {
+				logger.Debug("TTS output channel closed")
+				return
+			}
+			frameCount++
+			if frameCount%100 == 0 { // Log every second
+				logger.Debug("Playing TTS audio frame",
+					slog.Int("frame_count", frameCount),
+					slog.Int("sample_rate", frame.SampleRate),
+					slog.Int("data_len", len(frame.Data)))
+			}
+		}
+	}
+}
+
 func init() {
 	// Add flags to worker run command
 	workerRunCmd.Flags().String("url", "", "LiveKit server WebSocket URL")
@@ -436,17 +670,29 @@ func init() {
 	sttEchoCmd.Flags().String("file", "", "Path to WAV file to process")
 	sttEchoCmd.Flags().String("provider", "fake", "STT provider to use (fake)")
 	
+	// Add flags to agent demo command
+	agentDemoCmd.Flags().String("url", "", "LiveKit server WebSocket URL")
+	agentDemoCmd.Flags().String("token", "", "LiveKit server token")
+	agentDemoCmd.Flags().String("room", "", "Room name to join")
+	agentDemoCmd.Flags().Bool("metrics", false, "Enable metrics server on port 8080")
+	agentDemoCmd.Flags().String("bg-file", "", "Background audio WAV file to loop")
+	agentDemoCmd.Flags().Float32("bg-volume", 0.5, "Background audio volume (0.0 to 1.0)")
+	
 	// Mark required flags
 	jobRunScriptCmd.MarkFlagRequired("url")
 	jobRunScriptCmd.MarkFlagRequired("token")
 	jobRunScriptCmd.MarkFlagRequired("room")
 	sttEchoCmd.MarkFlagRequired("file")
+	agentDemoCmd.MarkFlagRequired("url")
+	agentDemoCmd.MarkFlagRequired("token")
+	agentDemoCmd.MarkFlagRequired("room")
 	
 	// Build command tree
 	workerCmd.AddCommand(workerRunCmd, workerHealthzCmd)
 	jobCmd.AddCommand(jobRunScriptCmd)
 	sttCmd.AddCommand(sttEchoCmd)
-	rootCmd.AddCommand(versionCmd, workerCmd, jobCmd, sttCmd)
+	agentCmd.AddCommand(agentDemoCmd)
+	rootCmd.AddCommand(versionCmd, workerCmd, jobCmd, sttCmd, agentCmd)
 }
 
 func main() {
