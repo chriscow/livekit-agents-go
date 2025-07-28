@@ -13,6 +13,7 @@ import (
 	vadfake "github.com/chriscow/livekit-agents-go/pkg/ai/vad/fake"
 	"github.com/chriscow/livekit-agents-go/pkg/job"
 	"github.com/chriscow/livekit-agents-go/pkg/rtc"
+	turnfake "github.com/chriscow/livekit-agents-go/pkg/turn/fake"
 )
 
 func TestAgent_New(t *testing.T) {
@@ -24,12 +25,13 @@ func TestAgent_New(t *testing.T) {
 		{
 			name: "valid config",
 			config: Config{
-				STT:    sttfake.NewFakeSTT("test"),
-				TTS:    ttsfake.NewFakeTTS(),
-				LLM:    fake.NewFakeLLM(),
-				VAD:    vadfake.NewFakeVAD(0.3),
-				MicIn:  make(<-chan rtc.AudioFrame),
-				TTSOut: make(chan<- rtc.AudioFrame),
+				STT:          sttfake.NewFakeSTT("test"),
+				TTS:          ttsfake.NewFakeTTS(),
+				LLM:          fake.NewFakeLLM(),
+				VAD:          vadfake.NewFakeVAD(0.3),
+				TurnDetector: turnfake.NewFakeTurnDetector(),
+				MicIn:        make(<-chan rtc.AudioFrame),
+				TTSOut:       make(chan<- rtc.AudioFrame),
 			},
 			expectError: false,
 		},
@@ -69,9 +71,22 @@ func TestAgent_New(t *testing.T) {
 		{
 			name: "missing VAD",
 			config: Config{
+				STT:          sttfake.NewFakeSTT("test"),
+				TTS:          ttsfake.NewFakeTTS(),
+				LLM:          fake.NewFakeLLM(),
+				TurnDetector: turnfake.NewFakeTurnDetector(),
+				MicIn:        make(<-chan rtc.AudioFrame),
+				TTSOut:       make(chan<- rtc.AudioFrame),
+			},
+			expectError: true,
+		},
+		{
+			name: "missing TurnDetector",
+			config: Config{
 				STT:    sttfake.NewFakeSTT("test"),
 				TTS:    ttsfake.NewFakeTTS(),
 				LLM:    fake.NewFakeLLM(),
+				VAD:    vadfake.NewFakeVAD(0.3),
 				MicIn:  make(<-chan rtc.AudioFrame),
 				TTSOut: make(chan<- rtc.AudioFrame),
 			},
@@ -80,22 +95,24 @@ func TestAgent_New(t *testing.T) {
 		{
 			name: "missing MicIn",
 			config: Config{
-				STT:    sttfake.NewFakeSTT("test"),
-				TTS:    ttsfake.NewFakeTTS(),
-				LLM:    fake.NewFakeLLM(),
-				VAD:    vadfake.NewFakeVAD(0.3),
-				TTSOut: make(chan<- rtc.AudioFrame),
+				STT:          sttfake.NewFakeSTT("test"),
+				TTS:          ttsfake.NewFakeTTS(),
+				LLM:          fake.NewFakeLLM(),
+				VAD:          vadfake.NewFakeVAD(0.3),
+				TurnDetector: turnfake.NewFakeTurnDetector(),
+				TTSOut:       make(chan<- rtc.AudioFrame),
 			},
 			expectError: true,
 		},
 		{
 			name: "missing TTSOut",
 			config: Config{
-				STT:   sttfake.NewFakeSTT("test"),
-				TTS:   ttsfake.NewFakeTTS(),
-				LLM:   fake.NewFakeLLM(),
-				VAD:   vadfake.NewFakeVAD(0.3),
-				MicIn: make(<-chan rtc.AudioFrame),
+				STT:          sttfake.NewFakeSTT("test"),
+				TTS:          ttsfake.NewFakeTTS(),
+				LLM:          fake.NewFakeLLM(),
+				VAD:          vadfake.NewFakeVAD(0.3),
+				TurnDetector: turnfake.NewFakeTurnDetector(),
+				MicIn:        make(<-chan rtc.AudioFrame),
 			},
 			expectError: true,
 		},
@@ -141,12 +158,13 @@ func TestAgent_StateTransitions(t *testing.T) {
 	llmProvider = fake.NewFakeLLM("Echo: Hello world")
 
 	config := Config{
-		STT:    sttProvider,
-		TTS:    ttsProvider,
-		LLM:    llmProvider,
-		VAD:    vadProvider,
-		MicIn:  micIn,
-		TTSOut: ttsOut,
+		STT:          sttProvider,
+		TTS:          ttsProvider,
+		LLM:          llmProvider,
+		VAD:          vadProvider,
+		TurnDetector: turnfake.NewFakeTurnDetector(),
+		MicIn:        micIn,
+		TTSOut:       ttsOut,
 	}
 
 	agent, err := New(config)
@@ -232,12 +250,13 @@ func TestAgent_Interrupt(t *testing.T) {
 	ttsOut := make(chan rtc.AudioFrame, 10)
 
 	config := Config{
-		STT:    sttfake.NewFakeSTT("test speech"),
-		TTS:    ttsfake.NewFakeTTS(),
-		LLM:    fake.NewFakeLLM(),
-		VAD:    vadfake.NewFakeVAD(0.3),
-		MicIn:  micIn,
-		TTSOut: ttsOut,
+		STT:          sttfake.NewFakeSTT("test speech"),
+		TTS:          ttsfake.NewFakeTTS(),
+		LLM:          fake.NewFakeLLM(),
+		VAD:          vadfake.NewFakeVAD(0.3),
+		TurnDetector: turnfake.NewFakeTurnDetector(),
+		MicIn:        micIn,
+		TTSOut:       ttsOut,
 	}
 
 	agent, err := New(config)
@@ -260,12 +279,13 @@ func TestAgent_Close(t *testing.T) {
 	ttsOut := make(chan rtc.AudioFrame)
 
 	config := Config{
-		STT:    sttfake.NewFakeSTT("test"),
-		TTS:    ttsfake.NewFakeTTS(),
-		LLM:    fake.NewFakeLLM(),
-		VAD:    vadfake.NewFakeVAD(0.3),
-		MicIn:  micIn,
-		TTSOut: ttsOut,
+		STT:          sttfake.NewFakeSTT("test"),
+		TTS:          ttsfake.NewFakeTTS(),
+		LLM:          fake.NewFakeLLM(),
+		VAD:          vadfake.NewFakeVAD(0.3),
+		TurnDetector: turnfake.NewFakeTurnDetector(),
+		MicIn:        micIn,
+		TTSOut:       ttsOut,
 	}
 
 	agent, err := New(config)
@@ -314,12 +334,13 @@ func TestAgent_RaceConditions(t *testing.T) {
 	ttsOut := make(chan rtc.AudioFrame, 100)
 
 	config := Config{
-		STT:    sttfake.NewFakeSTT("race test"),
-		TTS:    ttsfake.NewFakeTTS(),
-		LLM:    fake.NewFakeLLM(),
-		VAD:    vadfake.NewFakeVAD(0.3),
-		MicIn:  micIn,
-		TTSOut: ttsOut,
+		STT:          sttfake.NewFakeSTT("race test"),
+		TTS:          ttsfake.NewFakeTTS(),
+		LLM:          fake.NewFakeLLM(),
+		VAD:          vadfake.NewFakeVAD(0.3),
+		TurnDetector: turnfake.NewFakeTurnDetector(),
+		MicIn:        micIn,
+		TTSOut:       ttsOut,
 	}
 
 	agent, err := New(config)
@@ -443,12 +464,13 @@ func TestAgent_SimulateConversation(t *testing.T) {
 	)
 
 	config := Config{
-		STT:    sttProvider,
-		TTS:    ttsProvider,
-		LLM:    llmProvider,
-		VAD:    vadProvider,
-		MicIn:  micIn,
-		TTSOut: ttsOut,
+		STT:          sttProvider,
+		TTS:          ttsProvider,
+		LLM:          llmProvider,
+		VAD:          vadProvider,
+		TurnDetector: turnfake.NewFakeTurnDetector(),
+		MicIn:        micIn,
+		TTSOut:       ttsOut,
 	}
 
 	agent, err := New(config)

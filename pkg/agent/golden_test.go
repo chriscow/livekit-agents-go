@@ -12,6 +12,7 @@ import (
 	vadfake "github.com/chriscow/livekit-agents-go/pkg/ai/vad/fake"
 	"github.com/chriscow/livekit-agents-go/pkg/job"
 	"github.com/chriscow/livekit-agents-go/pkg/rtc"
+	turnfake "github.com/chriscow/livekit-agents-go/pkg/turn/fake"
 )
 
 // TestAgent_GoldenAudio tests the agent with a known audio input and validates
@@ -29,12 +30,13 @@ func TestAgent_GoldenAudio(t *testing.T) {
 	vadProvider := vadfake.NewFakeVAD(0.4) // Slightly higher probability for predictable behavior
 
 	config := Config{
-		STT:    sttProvider,
-		TTS:    ttsProvider,
-		LLM:    llmProvider,
-		VAD:    vadProvider,
-		MicIn:  micIn,
-		TTSOut: ttsOut,
+		STT:          sttProvider,
+		TTS:          ttsProvider,
+		LLM:          llmProvider,
+		VAD:          vadProvider,
+		TurnDetector: turnfake.NewFakeTurnDetector(),
+		MicIn:        micIn,
+		TTSOut:       ttsOut,
 	}
 
 	agent, err := New(config)
@@ -205,12 +207,13 @@ func TestAgent_MetricsExport(t *testing.T) {
 	ttsOut := make(chan rtc.AudioFrame, 10)
 
 	config := Config{
-		STT:    sttfake.NewFakeSTT("metrics test"),
-		TTS:    ttsfake.NewFakeTTS(),
-		LLM:    fake.NewFakeLLM("metrics response"),
-		VAD:    vadfake.NewFakeVAD(0.3),
-		MicIn:  micIn,
-		TTSOut: ttsOut,
+		STT:          sttfake.NewFakeSTT("metrics test"),
+		TTS:          ttsfake.NewFakeTTS(),
+		LLM:          fake.NewFakeLLM("metrics response"),
+		VAD:          vadfake.NewFakeVAD(0.3),
+		TurnDetector: turnfake.NewFakeTurnDetector(),
+		MicIn:        micIn,
+		TTSOut:       ttsOut,
 	}
 
 	agent, err := New(config)

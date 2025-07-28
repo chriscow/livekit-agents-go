@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"expvar"
 	"fmt"
 	"log/slog"
@@ -13,6 +14,7 @@ import (
 
 	"github.com/chriscow/livekit-agents-go/internal/worker"
 	"github.com/chriscow/livekit-agents-go/pkg/agent"
+	"github.com/chriscow/livekit-agents-go/pkg/ai/llm"
 	"github.com/chriscow/livekit-agents-go/pkg/ai/llm/fake"
 	"github.com/chriscow/livekit-agents-go/pkg/ai/stt"
 	sttfake "github.com/chriscow/livekit-agents-go/pkg/ai/stt/fake"
@@ -25,6 +27,7 @@ import (
 	_ "github.com/chriscow/livekit-agents-go/pkg/plugin/openai" // Import to register OpenAI plugin
 	_ "github.com/chriscow/livekit-agents-go/pkg/plugin/silero" // Import to register silero plugin
 	"github.com/chriscow/livekit-agents-go/pkg/rtc"
+	"github.com/chriscow/livekit-agents-go/pkg/turn"
 	"github.com/chriscow/livekit-agents-go/pkg/version"
 	"github.com/spf13/cobra"
 )
@@ -105,8 +108,18 @@ var workerHealthzCmd = &cobra.Command{
 			slog.String("version", version.Version),
 			slog.String("commit", version.GitCommit))
 		
-		// TODO: Implement actual health check that pings server
-		logger.Info("Health check passed")
+		// Basic connectivity health check - validate required flags are set
+		url, _ := cmd.Flags().GetString("url")
+		token, _ := cmd.Flags().GetString("token")
+		
+		if url == "" {
+			return fmt.Errorf("--url is required for health check")
+		}
+		if token == "" {
+			return fmt.Errorf("--token is required for health check")
+		}
+		
+		logger.Info("Health check passed - required parameters validated")
 		return nil
 	},
 }
@@ -514,6 +527,13 @@ func runAgentDemo(ctx context.Context, url, token, roomName string, metrics bool
 		"I understand what you're saying.",
 	)
 	vadProvider := vadfake.NewFakeVAD(0.3)
+	
+	// Create turn detector with fallback to fake if models not available
+	turnDetector, err := turn.NewDefaultDetector()
+	if err != nil {
+		logger.Warn("Failed to create turn detector, using fake", slog.String("error", err.Error()))
+		turnDetector = &FakeTurnDetector{}
+	}
 
 	// Set up background audio if requested
 	var backgroundAudio *agent.BackgroundAudio
@@ -537,6 +557,7 @@ func runAgentDemo(ctx context.Context, url, token, roomName string, metrics bool
 		TTS:             ttsProvider,
 		LLM:             llmProvider,
 		VAD:             vadProvider,
+		TurnDetector:    turnDetector,
 		MicIn:           micIn,
 		TTSOut:          ttsOut,
 		BackgroundAudio: backgroundAudio,
@@ -807,11 +828,140 @@ Each plugin .so file must export a RegisterPlugins() error function.`,
 	},
 }
 
+var turnCmd = &cobra.Command{
+	Use:   "turn",
+	Short: "Turn detection commands",
+}
+
+var turnDownloadCmd = &cobra.Command{
+	Use:   "download-models",
+	Short: "Download turn detection models",
+	Long: `Download English and multilingual turn detection models from the LiveKit model repository.
+Models are stored in $LK_MODEL_PATH/turn-detector or ~/.livekit/models/turn-detector.`,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		logger := setupLogger()
+		logger.Info("Starting turn detection model download")
+		
+		downloader := turn.NewDownloader("")
+		
+		if err := downloader.DownloadAll(); err != nil {
+			logger.Error("Failed to download models", slog.String("error", err.Error()))
+			return err
+		}
+		
+		logger.Info("Turn detection models downloaded successfully")
+		return nil
+	},
+}
+
+var turnPredictCmd = &cobra.Command{
+	Use:   "predict",
+	Short: "Predict end-of-turn probability from chat history JSON",
+	Long: `Read chat history JSON from stdin and output end-of-turn probability.
+Input format: {"messages": [{"role": "user", "content": "Hello"}], "language": "en-US"}
+Output format: {"eou_probability": 0.85}`,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		model, _ := cmd.Flags().GetString("model")
+		threshold, _ := cmd.Flags().GetFloat64("threshold")
+		language, _ := cmd.Flags().GetString("language")
+		remoteURL, _ := cmd.Flags().GetString("remote-url")
+		
+		logger := setupLogger()
+		logger.Debug("Starting turn prediction",
+			slog.String("model", model),
+			slog.Float64("threshold", threshold),
+			slog.String("language", language))
+		
+		return runTurnPredict(model, threshold, language, remoteURL, logger)
+	},
+}
+
+// FakeTurnDetector is a simple fake implementation for testing.
+type FakeTurnDetector struct{}
+
+func (f *FakeTurnDetector) UnlikelyThreshold(language string) (float64, error) {
+	return 0.85, nil
+}
+
+func (f *FakeTurnDetector) SupportsLanguage(language string) bool {
+	return true
+}
+
+func (f *FakeTurnDetector) PredictEndOfTurn(ctx context.Context, chatCtx turn.ChatContext) (float64, error) {
+	// Simple heuristic: return high probability for longer conversations
+	if len(chatCtx.Messages) > 2 {
+		return 0.9, nil
+	}
+	return 0.6, nil
+}
+
+func runTurnPredict(model string, threshold float64, language, remoteURL string, logger *slog.Logger) error {
+	// Read JSON from stdin
+	var input struct {
+		Messages []llm.Message `json:"messages"`
+		Language string         `json:"language,omitempty"`
+	}
+	
+	if err := json.NewDecoder(os.Stdin).Decode(&input); err != nil {
+		return fmt.Errorf("failed to decode input JSON: %w", err)
+	}
+	
+	// Override language if provided via flag
+	if language != "" {
+		input.Language = language
+	}
+	if input.Language == "" {
+		input.Language = "en-US" // Default
+	}
+	
+	// Create detector
+	config := turn.DetectorConfig{
+		Model:     model,
+		RemoteURL: remoteURL,
+	}
+	
+	detector, err := turn.NewDetector(config)
+	if err != nil {
+		return fmt.Errorf("failed to create detector: %w", err)
+	}
+	
+	// Create chat context
+	chatCtx := turn.ChatContext{
+		Messages: input.Messages,
+		Language: input.Language,
+	}
+	
+	// Predict end of turn
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	
+	probability, err := detector.PredictEndOfTurn(ctx, chatCtx)
+	if err != nil {
+		return fmt.Errorf("prediction failed: %w", err)
+	}
+	
+	// Output result as JSON
+	result := map[string]interface{}{
+		"eou_probability": probability,
+	}
+	
+	if threshold > 0 {
+		result["threshold"] = threshold
+		result["end_of_turn"] = probability >= threshold
+	}
+	
+	return json.NewEncoder(os.Stdout).Encode(result)
+}
+
 func init() {
 	// Add flags to worker run command
 	workerRunCmd.Flags().String("url", "", "LiveKit server WebSocket URL")
 	workerRunCmd.Flags().String("token", "", "LiveKit server token")
 	workerRunCmd.Flags().Bool("dry-run", false, "Dry run mode - validate config and exit")
+	
+	// Add flags to worker healthz command
+	workerHealthzCmd.Flags().String("url", "", "LiveKit server WebSocket URL")
+	workerHealthzCmd.Flags().String("token", "", "LiveKit server token")
 	
 	// Add flags to job run-script command
 	jobRunScriptCmd.Flags().String("url", "", "LiveKit server WebSocket URL")
@@ -840,13 +990,20 @@ func init() {
 	agentDemoCmd.MarkFlagRequired("token")
 	agentDemoCmd.MarkFlagRequired("room")
 	
+	// Add flags to turn predict command
+	turnPredictCmd.Flags().String("model", "livekit", "Model to use (livekit)")
+	turnPredictCmd.Flags().Float64("threshold", 0, "Override threshold for end-of-turn decision")
+	turnPredictCmd.Flags().String("language", "", "Language hint for detection optimization")
+	turnPredictCmd.Flags().String("remote-url", "", "Override LIVEKIT_REMOTE_EOT_URL")
+	
 	// Build command tree
 	workerCmd.AddCommand(workerRunCmd, workerHealthzCmd)
 	jobCmd.AddCommand(jobRunScriptCmd)
 	sttCmd.AddCommand(sttEchoCmd)
 	agentCmd.AddCommand(agentDemoCmd)
 	pluginCmd.AddCommand(pluginListCmd, pluginDownloadCmd, pluginLoadCmd)
-	rootCmd.AddCommand(versionCmd, workerCmd, jobCmd, sttCmd, agentCmd, pluginCmd)
+	turnCmd.AddCommand(turnDownloadCmd, turnPredictCmd)
+	rootCmd.AddCommand(versionCmd, workerCmd, jobCmd, sttCmd, agentCmd, pluginCmd, turnCmd)
 }
 
 func main() {

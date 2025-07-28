@@ -191,7 +191,7 @@ func (w *Worker) handleSignal(ctx context.Context, signal *Signal) {
 
 	case SignalTypeStartJob:
 		w.logger.Info("Received start job signal")
-		// TODO: Implement job handling in later phases
+		// TODO: Job handling implementation tracked in GitHub issue #26
 
 	case SignalTypeShutdown:
 		w.logger.Info("Received shutdown signal")

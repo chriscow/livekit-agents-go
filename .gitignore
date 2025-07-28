@@ -7,8 +7,10 @@
 **/debug-audio/*.wav
 **/coverage.out
 
+ai_docs/
+
 # Ignore the built binary in bin/
-bin/lk-go
+bin/
 # Also ignore if built in root directory
 /lk-go
 

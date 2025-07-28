@@ -3,6 +3,18 @@ module github.com/chriscow/livekit-agents-go
 go 1.24.0
 
 require (
+	github.com/gorilla/websocket v1.5.3
+	github.com/livekit/protocol v1.9.7
+	github.com/livekit/server-sdk-go v1.1.8
+	github.com/matryer/is v1.4.1
+	github.com/pion/webrtc/v3 v3.2.24
+	github.com/sashabaranov/go-openai v1.40.5
+	github.com/spf13/cobra v1.9.1
+	github.com/sugarme/tokenizer v0.2.2
+	github.com/yalue/onnxruntime_go v1.21.0
+)
+
+require (
 	github.com/beorn7/perks v1.0.1 // indirect
 	github.com/bep/debounce v1.2.1 // indirect
 	github.com/cespare/xxhash/v2 v2.2.0 // indirect
@@ -10,6 +22,7 @@ require (
 	github.com/dgryski/go-rendezvous v0.0.0-20200823014737-9f7001d12a5f // indirect
 	github.com/eapache/channels v1.1.0 // indirect
 	github.com/eapache/queue v1.1.0 // indirect
+	github.com/emirpasic/gods v1.12.0 // indirect
 	github.com/frostbyte73/core v0.0.9 // indirect
 	github.com/gammazero/deque v0.2.1 // indirect
 	github.com/go-jose/go-jose/v3 v3.0.1 // indirect
@@ -17,7 +30,6 @@ require (
 	github.com/go-logr/stdr v1.2.2 // indirect
 	github.com/golang/protobuf v1.5.3 // indirect
 	github.com/google/uuid v1.4.0 // indirect
-	github.com/gorilla/websocket v1.5.3 // indirect
 	github.com/inconshreveable/mousetrap v1.1.0 // indirect
 	github.com/jxskiss/base62 v1.1.0 // indirect
 	github.com/klauspost/compress v1.17.2 // indirect
@@ -25,13 +37,11 @@ require (
 	github.com/lithammer/shortuuid/v4 v4.0.0 // indirect
 	github.com/livekit/mageutil v0.0.0-20230125210925-54e8a70427c1 // indirect
 	github.com/livekit/mediatransportutil v0.0.0-20231213075826-cccbf2b93d3f // indirect
-	github.com/livekit/protocol v1.9.7 // indirect
 	github.com/livekit/psrpc v0.5.3-0.20231214055026-06ce27a934c9 // indirect
-	github.com/livekit/server-sdk-go v1.1.8 // indirect
 	github.com/mackerelio/go-osstat v0.2.4 // indirect
 	github.com/magefile/mage v1.15.0 // indirect
-	github.com/matryer/is v1.4.1 // indirect
 	github.com/matttproud/golang_protobuf_extensions/v2 v2.0.0 // indirect
+	github.com/mitchellh/colorstring v0.0.0-20190213212951-d06e56a500db // indirect
 	github.com/nats-io/nats.go v1.31.0 // indirect
 	github.com/nats-io/nkeys v0.4.6 // indirect
 	github.com/nats-io/nuid v1.0.1 // indirect
@@ -50,17 +60,17 @@ require (
 	github.com/pion/stun v0.6.1 // indirect
 	github.com/pion/transport/v2 v2.2.4 // indirect
 	github.com/pion/turn/v2 v2.1.3 // indirect
-	github.com/pion/webrtc/v3 v3.2.24 // indirect
 	github.com/pmezard/go-difflib v1.0.0 // indirect
 	github.com/prometheus/client_golang v1.18.0 // indirect
 	github.com/prometheus/client_model v0.5.0 // indirect
 	github.com/prometheus/common v0.45.0 // indirect
 	github.com/prometheus/procfs v0.12.0 // indirect
 	github.com/redis/go-redis/v9 v9.4.0 // indirect
-	github.com/sashabaranov/go-openai v1.40.5 // indirect
-	github.com/spf13/cobra v1.9.1 // indirect
+	github.com/rivo/uniseg v0.1.0 // indirect
+	github.com/schollz/progressbar/v2 v2.15.0 // indirect
 	github.com/spf13/pflag v1.0.6 // indirect
 	github.com/stretchr/testify v1.8.4 // indirect
+	github.com/sugarme/regexpset v0.0.0-20200920021344-4d4ec8eaf93c // indirect
 	github.com/thoas/go-funk v0.9.3 // indirect
 	github.com/twitchtv/twirp v8.1.3+incompatible // indirect
 	github.com/zeebo/xxh3 v1.0.2 // indirect

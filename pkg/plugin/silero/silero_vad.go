@@ -94,7 +94,7 @@ func NewSileroVAD(cfg Config) (*SileroVAD, error) {
 // loadONNXModel loads the Silero ONNX model.
 // This is a placeholder - real implementation would use onnxruntime-go.
 func (s *SileroVAD) loadONNXModel(modelPath string) error {
-	// TODO: Implement ONNX model loading using onnxruntime-go
+	// TODO: ONNX integration tracked in GitHub issue #23
 	// For now, we'll simulate successful loading
 	slog.Info("Loaded Silero ONNX model", slog.String("model_path", modelPath))
 	return nil
@@ -119,7 +119,7 @@ func (s *SileroVAD) Detect(ctx context.Context, frames <-chan rtc.AudioFrame) (<
 
 // detectWithONNX processes frames using the ONNX model.
 func (s *SileroVAD) detectWithONNX(ctx context.Context, frames <-chan rtc.AudioFrame, events chan<- vad.VADEvent) {
-	// TODO: Implement ONNX-based VAD processing
+	// TODO: ONNX VAD processing tracked in GitHub issue #23
 	// For now, fall back to energy-based detection
 	slog.Debug("Using ONNX-based VAD (placeholder implementation)")
 	s.energyVAD.detect(ctx, frames, events)
@@ -226,7 +226,7 @@ func Download() error {
 		return nil
 	}
 
-	// TODO: Implement actual model download
+	// TODO: Model download tracked in GitHub issue #17
 	// For now, create a placeholder file
 	slog.Info("Downloading Silero VAD model (placeholder)", slog.String("model_path", modelPath))
 	

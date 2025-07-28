@@ -29,7 +29,7 @@ func (d *SileroDownloader) Download() error {
 
 	slog.Info("Downloading Silero VAD model", slog.String("model_path", modelPath))
 
-	// TODO: Download from actual Silero model URL
+	// TODO: Real download implementation tracked in GitHub issue #17
 	// For now, create a placeholder that simulates a real download
 	modelURL := "https://github.com/snakers4/silero-vad/raw/master/src/silero_vad/data/silero_vad.onnx"
 	
