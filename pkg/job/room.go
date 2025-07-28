@@ -19,6 +19,9 @@ type Room struct {
 	// Internal LiveKit room connection
 	room *lksdk.Room
 	
+	// Room name for this connection
+	RoomName string
+	
 	// Context for managing the room lifecycle
 	ctx context.Context
 	
@@ -78,6 +81,7 @@ func NewRoom(ctx context.Context, config RoomConfig) (*Room, error) {
 	
 	r := &Room{
 		Events:       make(chan *Event, bufferSize),
+		RoomName:     config.RoomName,
 		ctx:          roomCtx,
 		cancel:       cancel,
 		connected:    false,

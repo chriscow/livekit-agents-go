@@ -2,6 +2,7 @@ package job
 
 import (
 	"context"
+	"sync"
 	"time"
 )
 
@@ -28,7 +29,7 @@ type JobContext struct {
 	cancel        context.CancelFunc
 	shutdownHooks []func(string)
 	shutdownOnce  bool
-	shutdownMu    chan struct{} // acts as mutex for shutdown
+	shutdownMu    sync.Mutex // protects shutdown state
 }
 
 // ShutdownInfo contains information about why a job shutdown occurred.

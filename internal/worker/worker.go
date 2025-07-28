@@ -9,6 +9,14 @@ import (
 	"time"
 )
 
+// Signal and command type constants
+const (
+	SignalTypePing     = "ping"
+	SignalTypePong     = "pong"
+	SignalTypeStartJob = "startJob"
+	SignalTypeShutdown = "shutdown"
+)
+
 type Worker struct {
 	url           string
 	token         string
@@ -168,22 +176,24 @@ func (w *Worker) handleSignal(ctx context.Context, signal *Signal) {
 	w.logger.Debug("Processing signal", slog.String("type", signal.Type))
 
 	switch signal.Type {
-	case "ping":
+	case SignalTypePing:
 		// Respond to ping with pong
 		pong := &Command{
-			Type: "pong",
+			Type: SignalTypePong,
 			Data: signal.Data,
 		}
 		select {
 		case w.out <- pong:
 		case <-ctx.Done():
+		default:
+			// Channel is closed or full, skip sending
 		}
 
-	case "startJob":
+	case SignalTypeStartJob:
 		w.logger.Info("Received start job signal")
 		// TODO: Implement job handling in later phases
 
-	case "shutdown":
+	case SignalTypeShutdown:
 		w.logger.Info("Received shutdown signal")
 		// Graceful shutdown will be handled by context cancellation
 

@@ -41,7 +41,7 @@ func (c *WebSocketClient) Connect(ctx context.Context) error {
 		return fmt.Errorf("invalid URL: %w", err)
 	}
 
-	// Add token as query parameter (simplified for Phase 1)
+	// TODO(security): move token to Authorization header to prevent query parameter leakage in proxy logs
 	q := u.Query()
 	q.Set("token", c.token)
 	u.RawQuery = q.Encode()
