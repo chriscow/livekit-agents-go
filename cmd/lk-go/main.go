@@ -20,6 +20,10 @@ import (
 	vadfake "github.com/chriscow/livekit-agents-go/pkg/ai/vad/fake"
 	"github.com/chriscow/livekit-agents-go/pkg/audio/wav"
 	"github.com/chriscow/livekit-agents-go/pkg/job"
+	"github.com/chriscow/livekit-agents-go/pkg/plugin"
+	_ "github.com/chriscow/livekit-agents-go/pkg/plugin/fake"   // Import to register fake plugins
+	_ "github.com/chriscow/livekit-agents-go/pkg/plugin/openai" // Import to register OpenAI plugin
+	_ "github.com/chriscow/livekit-agents-go/pkg/plugin/silero" // Import to register silero plugin
 	"github.com/chriscow/livekit-agents-go/pkg/rtc"
 	"github.com/chriscow/livekit-agents-go/pkg/version"
 	"github.com/spf13/cobra"
@@ -654,6 +658,155 @@ func simulateSpeakerOutput(ctx context.Context, ttsOut <-chan rtc.AudioFrame, lo
 	}
 }
 
+var pluginCmd = &cobra.Command{
+	Use:   "plugin",
+	Short: "Plugin management commands",
+}
+
+var pluginListCmd = &cobra.Command{
+	Use:   "list [kind]",
+	Short: "List registered plugins",
+	Long: `List all registered plugins or plugins of a specific kind.
+Available kinds: stt, tts, llm, vad`,
+	Args: cobra.MaximumNArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		logger := setupLogger()
+		
+		kind := ""
+		if len(args) > 0 {
+			kind = args[0]
+		}
+		
+		plugins := plugin.List(kind)
+		
+		if len(plugins) == 0 {
+			if kind == "" {
+				fmt.Println("No plugins registered")
+			} else {
+				fmt.Printf("No plugins registered for kind: %s\n", kind)
+			}
+			return nil
+		}
+		
+		// Print header
+		fmt.Printf("%-8s %-20s %-10s %s\n", "KIND", "NAME", "VERSION", "DESCRIPTION")
+		fmt.Println("------------------------------------------------------------")
+		
+		// Print plugins
+		for _, p := range plugins {
+			version := p.Version
+			if version == "" {
+				version = "N/A"
+			}
+			description := p.Description
+			if description == "" {
+				description = "No description"
+			}
+			fmt.Printf("%-8s %-20s %-10s %s\n", p.Kind, p.Name, version, description)
+		}
+		
+		logger.Info("Listed plugins",
+			slog.Int("count", len(plugins)),
+			slog.String("filter_kind", kind))
+		
+		return nil
+	},
+}
+
+var pluginDownloadCmd = &cobra.Command{
+	Use:   "download-files",
+	Short: "Download missing model files for all registered plugins",
+	Long: `Iterate through all registered plugins and download any missing model files.
+This is useful for plugins that require large model files that are not bundled with the binary.`,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		logger := setupLogger()
+		logger.Info("Starting plugin model file download")
+		
+		plugins := plugin.List("")
+		downloadCount := 0
+		errorCount := 0
+		
+		for _, p := range plugins {
+			logger.Info("Processing plugin", 
+				slog.String("kind", p.Kind),
+				slog.String("name", p.Name))
+			
+			if p.Downloader != nil {
+				logger.Info("Downloading model files for plugin",
+					slog.String("kind", p.Kind),
+					slog.String("name", p.Name))
+				
+				if err := p.Downloader.Download(); err != nil {
+					logger.Error("Failed to download model files",
+						slog.String("kind", p.Kind),
+						slog.String("name", p.Name),
+						slog.String("error", err.Error()))
+					errorCount++
+				} else {
+					downloadCount++
+				}
+			} else {
+				logger.Debug("No model files to download for plugin",
+					slog.String("kind", p.Kind),
+					slog.String("name", p.Name))
+			}
+		}
+		
+		logger.Info("Plugin model file download completed",
+			slog.Int("plugins_processed", len(plugins)),
+			slog.Int("files_downloaded", downloadCount),
+			slog.Int("errors", errorCount))
+		
+		if downloadCount == 0 && errorCount == 0 {
+			fmt.Println("No model files needed downloading")
+		} else {
+			fmt.Printf("Downloaded %d model files", downloadCount)
+			if errorCount > 0 {
+				fmt.Printf(" (%d errors)", errorCount)
+			}
+			fmt.Println()
+		}
+		
+		if errorCount > 0 {
+			return fmt.Errorf("failed to download %d model files", errorCount)
+		}
+		
+		return nil
+	},
+}
+
+var pluginLoadCmd = &cobra.Command{
+	Use:   "load [directory]",
+	Short: "Load dynamic plugins from directory (Linux only with -tags=plugindyn)",
+	Long: `Load .so plugin files from the specified directory.
+If no directory is specified, uses LK_PLUGIN_PATH environment variable 
+or defaults to /usr/local/lib/livekit-agents/plugins.
+
+This feature is only available on Linux with the plugindyn build tag:
+  go build -tags=plugindyn
+
+Each plugin .so file must export a RegisterPlugins() error function.`,
+	Args: cobra.MaximumNArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		logger := setupLogger()
+		
+		pluginDir := ""
+		if len(args) > 0 {
+			pluginDir = args[0]
+		}
+		
+		logger.Info("Loading dynamic plugins", slog.String("directory", pluginDir))
+		
+		if err := plugin.LoadDynamicPlugins(pluginDir); err != nil {
+			logger.Error("Failed to load dynamic plugins", slog.String("error", err.Error()))
+			return err
+		}
+		
+		logger.Info("Dynamic plugin loading completed")
+		return nil
+	},
+}
+
 func init() {
 	// Add flags to worker run command
 	workerRunCmd.Flags().String("url", "", "LiveKit server WebSocket URL")
@@ -692,7 +845,8 @@ func init() {
 	jobCmd.AddCommand(jobRunScriptCmd)
 	sttCmd.AddCommand(sttEchoCmd)
 	agentCmd.AddCommand(agentDemoCmd)
-	rootCmd.AddCommand(versionCmd, workerCmd, jobCmd, sttCmd, agentCmd)
+	pluginCmd.AddCommand(pluginListCmd, pluginDownloadCmd, pluginLoadCmd)
+	rootCmd.AddCommand(versionCmd, workerCmd, jobCmd, sttCmd, agentCmd, pluginCmd)
 }
 
 func main() {

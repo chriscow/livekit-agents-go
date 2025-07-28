@@ -4,8 +4,10 @@ package agent
 
 import (
 	"context"
+	"encoding/json"
 	"expvar"
 	"fmt"
+	"log"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -17,6 +19,14 @@ import (
 	"github.com/chriscow/livekit-agents-go/pkg/job"
 	"github.com/chriscow/livekit-agents-go/pkg/rtc"
 )
+
+// Tool represents a function that the agent can call in response to LLM function calls.
+type Tool struct {
+	Name        string                              // Function name
+	Description string                              // Description for the LLM
+	Schema      map[string]any                      // JSON schema for parameters
+	Handler     func(context.Context, string) (string, error) // Function handler (receives JSON args, returns result)
+}
 
 // AgentState represents the current state of the voice agent.
 type AgentState int32
@@ -52,6 +62,9 @@ type Agent struct {
 	tts tts.TTS
 	llm llm.LLM
 	vad vad.VAD
+	
+	// Tools for function calling
+	tools map[string]Tool
 
 	// State management
 	state atomic.Int32
@@ -101,6 +114,9 @@ type Config struct {
 	MicIn  <-chan rtc.AudioFrame
 	TTSOut chan<- rtc.AudioFrame
 
+	// Tools for function calling (optional)
+	Tools []Tool
+
 	// BackgroundAudio is optional background audio support
 	BackgroundAudio *BackgroundAudio
 }
@@ -126,11 +142,18 @@ func New(cfg Config) (*Agent, error) {
 		return nil, fmt.Errorf("TTSOut channel is required")
 	}
 
+	// Initialize tools map
+	toolsMap := make(map[string]Tool)
+	for _, tool := range cfg.Tools {
+		toolsMap[tool.Name] = tool
+	}
+
 	a := &Agent{
 		stt:             cfg.STT,
 		tts:             cfg.TTS,
 		llm:             cfg.LLM,
 		vad:             cfg.VAD,
+		tools:           toolsMap,
 		micIn:           cfg.MicIn,
 		ttsOut:          cfg.TTSOut,
 		interrupts:      make(chan struct{}, 1),
@@ -404,21 +427,94 @@ func (a *Agent) startThinking(ctx context.Context) error {
 	return nil
 }
 
-// processLLMResponse handles LLM processing and TTS synthesis.
+// processLLMResponse handles LLM processing with tool calling and TTS synthesis.
 func (a *Agent) processLLMResponse(ctx context.Context, transcript string) error {
-	// Send transcript to LLM
+	// Initialize conversation with user message
+	messages := []llm.Message{
+		{Role: llm.RoleUser, Content: transcript},
+	}
+	
+	// Convert tools to function definitions for LLM
+	var functions []llm.FunctionDefinition
+	for _, tool := range a.tools {
+		functions = append(functions, llm.FunctionDefinition{
+			Name:        tool.Name,
+			Description: tool.Description,
+			Parameters:  tool.Schema,
+		})
+	}
+	
+	// Tool calling loop with max depth to prevent infinite loops
+	const maxToolCalls = 10
+	for i := 0; i < maxToolCalls; i++ {
+		response, err := a.llm.Chat(ctx, llm.ChatRequest{
+			Messages:  messages,
+			Functions: functions,
+		})
+		if err != nil {
+			return fmt.Errorf("LLM chat failed: %w", err)
+		}
+		
+		// If no function call, we're done - start speaking
+		if response.FunctionCall == nil {
+			a.setState(StateSpeaking)
+			return a.startSpeaking(ctx, response.Message.Content)
+		}
+		
+		// Handle function call
+		log.Printf("🔧 LLM requested function call: %s", response.FunctionCall.Name)
+		
+		// Add assistant message with function call to history
+		messages = append(messages, llm.Message{
+			Role:    llm.RoleAssistant,
+			Content: response.Message.Content,
+		})
+		
+		// Execute the function
+		toolResult, err := a.executeTool(ctx, response.FunctionCall)
+		if err != nil {
+			log.Printf("❌ Tool execution failed: %v", err)
+			toolResult = fmt.Sprintf("Error: %s", err.Error())
+		}
+		
+		// Add function result to conversation history
+		messages = append(messages, llm.Message{
+			Role:    llm.RoleFunction,
+			Content: toolResult,
+			Name:    response.FunctionCall.Name,
+		})
+		
+		log.Printf("✅ Tool %s executed, result: %s", response.FunctionCall.Name, toolResult)
+	}
+	
+	// If we hit max tool calls, continue with final response
+	log.Printf("⚠️ Maximum tool calls (%d) reached, proceeding with final response", maxToolCalls)
 	response, err := a.llm.Chat(ctx, llm.ChatRequest{
-		Messages: []llm.Message{
-			{Role: llm.RoleUser, Content: transcript},
-		},
+		Messages: messages,
 	})
 	if err != nil {
-		return fmt.Errorf("LLM chat failed: %w", err)
+		return fmt.Errorf("final LLM chat failed: %w", err)
 	}
-
-	// Start speaking
+	
 	a.setState(StateSpeaking)
 	return a.startSpeaking(ctx, response.Message.Content)
+}
+
+// executeTool executes a function call and returns the result
+func (a *Agent) executeTool(ctx context.Context, functionCall *llm.FunctionCall) (string, error) {
+	tool, exists := a.tools[functionCall.Name]
+	if !exists {
+		return "", fmt.Errorf("unknown function: %s", functionCall.Name)
+	}
+	
+	// Validate that arguments is valid JSON
+	var args map[string]any
+	if err := json.Unmarshal([]byte(functionCall.Arguments), &args); err != nil {
+		return "", fmt.Errorf("invalid function arguments JSON: %w", err)
+	}
+	
+	// Execute the tool handler
+	return tool.Handler(ctx, functionCall.Arguments)
 }
 
 // startSpeaking begins TTS synthesis and audio playback.
