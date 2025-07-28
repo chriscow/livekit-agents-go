@@ -1,0 +1,42 @@
+name: CI
+
+on:
+  push:
+    branches: [ main, rewrite ]
+  pull_request:
+    branches: [ main, rewrite ]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - uses: actions/checkout@v4
+      
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.24"
+      
+      - name: Run go vet
+        run: go vet ./...
+      
+      - name: Run tests
+        run: go test ./... -race -coverprofile=coverage.out
+      
+      - uses: golangci/golangci-lint-action@v3
+        with:
+          version: latest
+      
+      - name: Test CLI smoke tests
+        run: |
+          go run ./cmd/lk-go version | grep -q "version"
+          go run ./cmd/lk-go worker run --dry-run
+          timeout 2s go run ./cmd/lk-go worker run --dry-run || [ $? -eq 124 ] || [ $? -eq 0 ]
+      
+      - name: Build CLI binary
+        run: make build
+      
+      - name: Test binary
+        run: |
+          ./bin/lk-go version
+          ./bin/lk-go worker healthz

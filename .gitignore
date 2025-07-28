@@ -5,6 +5,7 @@
 **/.venv
 
 **/debug-audio/*.wav
-
+**/coverage.out
+**/lk-go
 
 CLAUDE.md
