@@ -6,6 +6,10 @@
 
 **/debug-audio/*.wav
 **/coverage.out
-**/lk-go
+
+# Ignore the built binary in bin/
+bin/lk-go
+# Also ignore if built in root directory
+/lk-go
 
 CLAUDE.md

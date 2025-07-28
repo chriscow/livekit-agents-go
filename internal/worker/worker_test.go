@@ -56,7 +56,7 @@ func TestWorker_HandleSignal_Ping(t *testing.T) {
 	// Create a ping signal
 	pingSignal := &Signal{
 		Type: "ping",
-		Data: map[string]interface{}{"id": "test-ping"},
+		Data: map[string]any{"id": "test-ping"},
 	}
 
 	// Handle the signal
@@ -87,7 +87,7 @@ func TestWorker_HandleSignal_StartJob(t *testing.T) {
 	// Create a startJob signal
 	startJobSignal := &Signal{
 		Type: "startJob",
-		Data: map[string]interface{}{"jobId": "test-job"},
+		Data: map[string]any{"jobId": "test-job"},
 	}
 
 	// Handle the signal (should not panic for now)
@@ -107,7 +107,7 @@ func TestWorker_HandleSignal_Unknown(t *testing.T) {
 	// Create an unknown signal
 	unknownSignal := &Signal{
 		Type: "unknownType",
-		Data: map[string]interface{}{"foo": "bar"},
+		Data: map[string]any{"foo": "bar"},
 	}
 
 	// Handle the signal (should not panic)

@@ -75,6 +75,79 @@ type VAD interface {
 }
 ```
 
+### 2.5 Audio Core Types & Canonical Requirements
+
+LiveKit’s real-time stack **always processes 10 ms chunks** of 16-bit signed PCM. In practice this means:
+
+* `SamplesPerChannel == SampleRate / 100` – e.g. 480 samples at 48 kHz.
+* Allowed `SampleRate` values: **48 000 Hz** (canonical, Opus), plus 16 000 Hz for STT/VAD fallbacks.
+* Supported `NumChannels`: **1 (mono)** or **2 (stereo)**.
+* `Data` layout: interleaved `int16` little-endian.
+
+Create a single authoritative type in `pkg/rtc` so every package shares the same definition:
+
+```go
+// pkg/rtc/audio.go
+package rtc
+
+// AudioFrame represents exactly 10 ms of PCM audio.
+// Len(Data) == SamplesPerChannel * NumChannels * 2.
+// All fields are immutable after creation except Data when processed in-place.
+//
+// A zero Timestamp means "live"; otherwise it points to absolute wall-clock.
+type AudioFrame struct {
+    Data              []byte        // 16-bit PCM, little-endian
+    SampleRate        int           // 48 000 or 16 000
+    SamplesPerChannel int           // SampleRate / 100
+    NumChannels       int           // 1 or 2
+    Timestamp         time.Duration // optional
+}
+```
+
+### 2.6 AudioProcessor (Echo Cancellation, NS, AGC)
+
+The AudioProcessor abstracts WebRTC’s `AudioProcessingModule` (AEC3). Later phases will provide the CGO/FFI implementation; **for Phase 3 deliver only the interface and a no-op fake** so downstream code compiles.
+
+```go
+// pkg/ai/audio/processor.go
+package audio
+
+// Config toggles individual WebRTC sub-modules.
+type ProcessorConfig struct {
+    EchoCancellation bool
+    NoiseSuppression bool
+    HighPassFilter   bool
+    AutoGainControl  bool
+}
+
+type Processor interface {
+    // Far-end (speaker output) reference – MUST be 10 ms frames.
+    ProcessReverse(frame rtc.AudioFrame) error
+    // Near-end (microphone) capture – processed in-place.
+    ProcessCapture(frame *rtc.AudioFrame) error
+
+    // Provide measured delay between reverse/capture paths when EC is on.
+    SetStreamDelay(d time.Duration) error
+    Close() error
+}
+```
+
+Implement a stub in `pkg/ai/audio/fake` that returns frames unchanged.
+
+### 2.7 AudioGate Helper
+
+During TTS playback the microphone stream may need to be *logically* muted (frames discarded) when interruptions are disabled. Expose a minimal helper so higher-level voice logic does not hard-code that policy:
+
+```go
+// pkg/voice/gate.go
+type AudioGate interface {
+    SetTTSPlaying(playing bool)
+    ShouldDiscardAudio() bool // true → drop mic frame
+}
+```
+
+Provide a default implementation with atomic booleans in `pkg/voice/internal/gate`.
+
 ---
 
 ## 3. Implementation Steps

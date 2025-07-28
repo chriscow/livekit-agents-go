@@ -18,13 +18,13 @@ type WebSocketClient struct {
 }
 
 type Signal struct {
-	Type string                 `json:"type"`
-	Data map[string]interface{} `json:"data,omitempty"`
+	Type string         `json:"type"`
+	Data map[string]any `json:"data,omitempty"`
 }
 
 type Command struct {
-	Type string                 `json:"type"`
-	Data map[string]interface{} `json:"data,omitempty"`
+	Type string         `json:"type"`
+	Data map[string]any `json:"data,omitempty"`
 }
 
 func NewWebSocketClient(serverURL, token string, logger *slog.Logger) *WebSocketClient {

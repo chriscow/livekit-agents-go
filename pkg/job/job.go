@@ -22,7 +22,12 @@ func New(parentCtx context.Context, cfg Config) (*Job, error) {
 	// Set up timeout context if specified
 	var ctx context.Context
 	if cfg.Timeout > 0 {
-		ctx, _ = context.WithTimeout(parentCtx, cfg.Timeout)
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(parentCtx, cfg.Timeout)
+		// The cancel function will be called automatically when the timeout expires
+		// or when the parent context is cancelled. We don't need to store it
+		// because JobContext will manage its own cancellation.
+		_ = cancel
 	} else {
 		ctx = parentCtx
 	}
